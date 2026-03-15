@@ -15,6 +15,7 @@ namespace Beasts;
 public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
 {
     private readonly Dictionary<long, Entity> _trackedBeasts = new();
+    private readonly Dictionary<long, Entity> _trackedYellowBeasts = new();
 
     private static readonly HashSet<string> KnownBeastPaths = new(
         BeastsDatabase.AllBeasts.Select(b => b.Path).Where(p => !string.IsNullOrEmpty(p)),
@@ -60,6 +61,57 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
         foreach (var id in beastsToRemove)
         {
             _trackedBeasts.Remove(id);
+        }
+
+        // Track yellow beasts (IsCapturableMonster but not in database)
+        var yellowToRemove = new List<long>();
+        foreach (var trackedYellow in _trackedYellowBeasts)
+        {
+            var entity = trackedYellow.Value;
+            if (entity == null || !entity.IsValid)
+            {
+                yellowToRemove.Add(trackedYellow.Key);
+                continue;
+            }
+
+            var buffs = entity.GetComponent<Buffs>();
+            if (buffs != null && buffs.BuffsList.Any(buff => buff.Name == "capture_monster_trapped"))
+            {
+                yellowToRemove.Add(trackedYellow.Key);
+            }
+        }
+
+        foreach (var id in yellowToRemove)
+        {
+            _trackedYellowBeasts.Remove(id);
+        }
+
+        // Scan for new yellow beasts not yet tracked
+        foreach (var entity in GameController.EntityListWrapper.ValidEntitiesByType[EntityType.Monster])
+        {
+            if (_trackedYellowBeasts.ContainsKey(entity.Id)) continue;
+            if (!entity.IsValid || !entity.IsAlive) continue;
+
+            var stats = entity.GetComponent<Stats>();
+            if (stats == null) continue;
+            if (!stats.StatDictionary.TryGetValue(GameStat.IsCapturableMonster, out var capVal) || capVal <= 0)
+                continue;
+
+            var metadata = entity.Metadata ?? "";
+            var isKnown = false;
+            foreach (var knownPath in KnownBeastPaths)
+            {
+                if (metadata.StartsWith(knownPath, StringComparison.Ordinal))
+                {
+                    isKnown = true;
+                    break;
+                }
+            }
+
+            if (!isKnown)
+            {
+                _trackedYellowBeasts[entity.Id] = entity;
+            }
         }
 
         return null;
@@ -124,6 +176,7 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
     public override void AreaChange(AreaInstance area)
     {
         _trackedBeasts.Clear();
+        _trackedYellowBeasts.Clear();
     }
 
     public override void EntityAdded(Entity entity)
@@ -137,9 +190,7 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
 
     public override void EntityRemoved(Entity entity)
     {
-        if (_trackedBeasts.ContainsKey(entity.Id))
-        {
-            _trackedBeasts.Remove(entity.Id);
-        }
+        _trackedBeasts.Remove(entity.Id);
+        _trackedYellowBeasts.Remove(entity.Id);
     }
 }

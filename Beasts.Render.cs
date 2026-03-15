@@ -103,20 +103,7 @@ public partial class Beasts
             if (beast == null) continue;
             if (Settings.Beasts.All(b => b.Path != beast.Path)) continue;
 
-            var beastPosition = new Vector2(positioned.GridPosNum.X, positioned.GridPosNum.Y);
-            var beastGridPos = positioned.GridPosNum;
-
-            float beastHeight = 0;
-            int beastX = (int)beastGridPos.X;
-            int beastY = (int)beastGridPos.Y;
-            if (heightData != null && beastY >= 0 && beastY < heightData.Length
-                && beastX >= 0 && beastX < heightData[beastY].Length)
-            {
-                beastHeight = heightData[beastY][beastX];
-            }
-
-            var mapDelta = TranslateGridDeltaToMapDelta(beastPosition - playerPosition, playerHeight + beastHeight);
-            var mapPos = mapCenter + mapDelta;
+            var mapPos = EntityToMapPos(positioned, playerPosition, playerHeight, heightData, mapCenter);
 
             if (Settings.BeastPrices.TryGetValue(beast.DisplayName, out var price) && price > 0)
             {
@@ -132,6 +119,43 @@ public partial class Beasts
                 DrawText(text, mapPos - textOffset, color);
             }
         }
+
+        // Draw yellow beasts on map
+        foreach (var trackedYellow in _trackedYellowBeasts)
+        {
+            var entity = trackedYellow.Value;
+            var positioned = entity.GetComponent<Positioned>();
+            if (positioned == null) continue;
+
+            var mapPos = EntityToMapPos(positioned, playerPosition, playerHeight, heightData, mapCenter);
+
+            var renderName = entity.GetComponent<Render>()?.Name ?? "Yellow Beast";
+            var text = renderName;
+            var textSize = Graphics.MeasureText(text);
+            var textOffset = textSize / 2f;
+
+            var bgPadding = new Vector2(4, 2);
+            DrawBox(mapPos - textOffset - bgPadding, mapPos + textOffset + bgPadding, new Color(0, 0, 0, 180));
+            DrawText(text, mapPos - textOffset, new Color(255, 250, 0));
+        }
+    }
+
+    private Vector2 EntityToMapPos(Positioned positioned, Vector2 playerPosition, float playerHeight, float[][] heightData, Vector2 mapCenter)
+    {
+        var beastPosition = new Vector2(positioned.GridPosNum.X, positioned.GridPosNum.Y);
+        var beastGridPos = positioned.GridPosNum;
+
+        float beastHeight = 0;
+        int beastX = (int)beastGridPos.X;
+        int beastY = (int)beastGridPos.Y;
+        if (heightData != null && beastY >= 0 && beastY < heightData.Length
+            && beastX >= 0 && beastX < heightData[beastY].Length)
+        {
+            beastHeight = heightData[beastY][beastX];
+        }
+
+        var mapDelta = TranslateGridDeltaToMapDelta(beastPosition - playerPosition, playerHeight + beastHeight);
+        return mapCenter + mapDelta;
     }
 
     private Vector2 TranslateGridDeltaToMapDelta(Vector2 delta, float deltaZ)
@@ -169,6 +193,21 @@ public partial class Beasts
                 FontAlign.Center);
 
             DrawFilledCircleInWorldPosition(pos, 100, GetSpecialBeastColor(beast.DisplayName));
+        }
+
+        // Draw yellow beasts in world
+        foreach (var trackedYellow in _trackedYellowBeasts)
+        {
+            var entity = trackedYellow.Value;
+            var positioned = entity.GetComponent<Positioned>();
+            if (positioned == null) continue;
+
+            var renderName = entity.GetComponent<Render>()?.Name ?? "Yellow Beast";
+            var pos = GameController.IngameState.Data.ToWorldWithTerrainHeight(positioned.GridPosition);
+            Graphics.DrawText(renderName, GameController.IngameState.Camera.WorldToScreen(pos), new Color(255, 250, 0),
+                FontAlign.Center);
+
+            DrawFilledCircleInWorldPosition(pos, 100, new Color(255, 250, 0));
         }
     }
 
@@ -263,6 +302,19 @@ public partial class Beasts
                 {
                     ImGui.Text(craft);
                 }
+            }
+
+            // Yellow beasts in tracking window
+            foreach (var trackedYellow in _trackedYellowBeasts)
+            {
+                var entity = trackedYellow.Value;
+                var renderName = entity.GetComponent<Render>()?.Name ?? "Yellow Beast";
+
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+                ImGui.TextColored(new System.Numerics.Vector4(1f, 0.98f, 0f, 1f), "-");
+                ImGui.TableNextColumn();
+                ImGui.TextColored(new System.Numerics.Vector4(1f, 0.98f, 0f, 1f), renderName);
             }
 
             ImGui.EndTable();
