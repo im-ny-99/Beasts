@@ -84,7 +84,12 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
 
     private bool IsAllowedBeastNearby(int range)
     {
-        return GetAllowedBeastsInRange(range).Any();
+        var allowed = GetAllowedBeastsInRange(range).ToList();
+        if (allowed.Count > 0)
+        {
+            DebugWindow.LogMsg($"[Beasts Bridge] Allowed beast nearby: {allowed[0].Metadata} (total: {allowed.Count})", 2);
+        }
+        return allowed.Count > 0;
     }
 
     private bool CastSkillOnAllowedBeast(uint skillId, int range)
@@ -171,6 +176,8 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
         return null;
     }
 
+    private static DateTime _lastDebugLog = DateTime.MinValue;
+
     private IEnumerable<Entity> GetAllowedBeastsInRange(int range)
     {
         var maxRange = Math.Max(1, range);
@@ -178,6 +185,8 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
             .Select(beast => beast.Path)
             .Where(path => !string.IsNullOrEmpty(path))
             .ToHashSet(StringComparer.Ordinal);
+
+        var shouldLog = (DateTime.Now - _lastDebugLog).TotalSeconds >= 3;
 
         foreach (var entity in GameController.EntityListWrapper.ValidEntitiesByType[EntityType.Monster])
         {
@@ -195,20 +204,41 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
                     break;
                 }
             }
-            if (!isBeast) continue;
+
+            if (!isBeast)
+            {
+                if (shouldLog && metadata.Contains("Bestiary", StringComparison.OrdinalIgnoreCase))
+                {
+                    DebugWindow.LogMsg($"[Beasts Debug] Skipped (no prefix match): {metadata}", 5);
+                }
+                continue;
+            }
 
             var isKnownBeast = KnownBeastPaths.Contains(metadata);
             if (!isKnownBeast)
             {
-                // Yellow beast (not in database) — always allow
+                if (shouldLog)
+                {
+                    DebugWindow.LogMsg($"[Beasts Debug] YELLOW allowed: {metadata}", 5);
+                    _lastDebugLog = DateTime.Now;
+                }
                 yield return entity;
                 continue;
             }
 
-            // Known/named beast — only allow if selected in GUI
             if (selectedPaths.Contains(metadata))
             {
+                if (shouldLog)
+                {
+                    DebugWindow.LogMsg($"[Beasts Debug] RED SELECTED allowed: {metadata}", 5);
+                    _lastDebugLog = DateTime.Now;
+                }
                 yield return entity;
+            }
+            else if (shouldLog)
+            {
+                DebugWindow.LogMsg($"[Beasts Debug] RED UNSELECTED blocked: {metadata}", 5);
+                _lastDebugLog = DateTime.Now;
             }
         }
     }
