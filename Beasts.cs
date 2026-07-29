@@ -79,11 +79,22 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
 
             DebugWindow.LogMsg($"Fetching Beast Prices from PoeNinja (league: {league})...");
             var prices = await PoeNinja.GetBeastsPrices(league);
+
+            // Keep the FULL poe.ninja price list -- species missing from our
+            // database (e.g. newly tracked beasts) must still price correctly
+            // in the bestiary cache and automation instead of being misread
+            // as worthless yellows. Database beasts keep an entry even when
+            // poe.ninja does not list them so UI code can index them freely.
+            // Built as a new dictionary and swapped in one reference write so
+            // the render thread never observes a half-built table.
+            var newPrices = new Dictionary<string, float>(prices);
             foreach (var beast in BeastsDatabase.AllBeasts)
             {
-                Settings.BeastPrices[beast.DisplayName] = prices.TryGetValue(beast.DisplayName, out var price) ? price : -1;
+                if (!newPrices.ContainsKey(beast.DisplayName))
+                    newPrices[beast.DisplayName] = -1;
             }
 
+            Settings.BeastPrices = newPrices;
             Settings.LastUpdate = DateTime.Now;
         }
         catch (Exception exception)

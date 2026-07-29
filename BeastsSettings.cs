@@ -50,8 +50,8 @@ public class BeastsSettings : ISettings
                                 ? [.. sortedBeasts.OrderBy(b => Beasts.Any(eb => eb.Path == b.Path))]
                                 : [.. sortedBeasts.OrderByDescending(b => Beasts.Any(eb => eb.Path == b.Path))],
                             1 => sortAscending
-                                ? [.. sortedBeasts.OrderBy(b => BeastPrices[b.DisplayName])]
-                                : [.. sortedBeasts.OrderByDescending(b => BeastPrices[b.DisplayName])],
+                                ? [.. sortedBeasts.OrderBy(b => BeastPrices.TryGetValue(b.DisplayName, out var p) ? p : -1)]
+                                : [.. sortedBeasts.OrderByDescending(b => BeastPrices.TryGetValue(b.DisplayName, out var p) ? p : -1)],
                             2 => sortAscending
                                 ? [.. sortedBeasts.OrderBy(b => b.DisplayName)]
                                 : [.. sortedBeasts.OrderByDescending(x => x.DisplayName)],
