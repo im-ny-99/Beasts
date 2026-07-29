@@ -21,14 +21,16 @@ public partial class Beasts
     private readonly Random _random = new();
 
     /// <summary>
-    /// Checks whether a beast should be itemized (true) or released (false)
-    /// based on the current automation settings and price threshold.
+    /// Checks whether a beast should be itemized (true) or released (false).
+    /// Price wins first: a beast worth the threshold is itemized even when it
+    /// is a yellow (some league-mechanic yellows sell for real money). The
+    /// yellow toggle then only forces itemizing the cheap generic captures.
     /// </summary>
     private bool ShouldItemizeBeast(CachedBeastEntry entry, int threshold)
     {
-        if (entry.IsGenericYellow)
-            return Settings.Automation.ItemizeYellowBeasts.Value;
-        return entry.Price >= threshold;
+        if (entry.Price >= threshold) return true;
+        if (entry.IsGenericYellow) return Settings.Automation.ItemizeYellowBeasts.Value;
+        return false;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
