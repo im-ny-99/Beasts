@@ -38,11 +38,14 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
         StringComparer.Ordinal
     );
 
-    // O(1) path → Beast lookup used in Render methods instead of O(n) FirstOrDefault/All
+    // O(1) path → Beast lookup used in Render methods instead of O(n) FirstOrDefault/All.
+    // Grouped by path so a duplicate database entry degrades to first-wins instead of
+    // a TypeInitializationException that kills the whole plugin.
     internal static readonly Dictionary<string, Beast> BeastByPath =
         BeastsDatabase.AllBeasts
             .Where(b => !string.IsNullOrEmpty(b.Path))
-            .ToDictionary(b => b.Path, b => b, StringComparer.Ordinal);
+            .GroupBy(b => b.Path, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
 
     public override void OnLoad()
     {

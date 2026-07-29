@@ -101,15 +101,9 @@ public static class BeastsDatabase
             Path = "Metadata/Monsters/LeagueHarvest/Green/HarvestVultureParasiteT3",
             Crafts = ["Transform an Item: Reroll a Synthesis Implicit Modifier"]
         },
-        new Beast
-        {
-            DisplayName = "Craicic Chimeral",
-            Path = "Metadata/Monsters/LeagueBestiary/GemFrogBestiary",
-            Crafts =
-            [
-                "Create an Imprint: Of a Magic Item"
-            ]
-        },
+        // "Craicic Chimeral" was removed: the species no longer exists in
+        // BestiaryCapturableMonsters.dat and its path (GemFrogBestiary) now
+        // belongs to Craicic Croaker, which inherited the imprint craft.
         new Beast
         {
             DisplayName = "Wild Hellion Alpha",
@@ -568,8 +562,8 @@ public static class BeastsDatabase
             Path = "Metadata/Monsters/LeagueBestiary/GemFrogBestiary",
             Crafts =
             [
-                "Croaker Talisman",
-                "Modify a Magic Item (Of a Magic Item / To a Magic Item)"
+                "Create an Imprint: Of a Magic Item",
+                "Croaker Talisman"
             ]
         },
         new Beast
