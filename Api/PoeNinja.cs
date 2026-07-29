@@ -1,5 +1,5 @@
-﻿using System.Collections.Generic;
-using System.Linq;
+using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
@@ -8,12 +8,13 @@ namespace Beasts.Api;
 
 public static class PoeNinja
 {
-    private static readonly string PoeNinjaUrl = "https://poe.ninja/api/data/itemoverview?league=Mirage&type=Beast";
+    private const string PoeNinjaUrlTemplate =
+        "https://poe.ninja/poe1/api/economy/stash/current/item/overview?league={0}&type=Beast";
 
     private class PoeNinjaLine
     {
         [JsonProperty("name")] public string Name;
-        [JsonProperty("chaosValue")] public float ChaosValue;
+        [JsonProperty("chaosValue")] public float? ChaosValue;
     }
 
     private class PoeNinjaResponse
@@ -21,15 +22,26 @@ public static class PoeNinja
         [JsonProperty("lines")] public List<PoeNinjaLine> Lines;
     }
 
-    public static async Task<Dictionary<string, float>> GetBeastsPrices()
+    public static async Task<Dictionary<string, float>> GetBeastsPrices(string league)
     {
         using var httpClient = new HttpClient();
-        var response = await httpClient.GetAsync(PoeNinjaUrl);
-        if (!response.IsSuccessStatusCode) throw new HttpRequestException("Failed to get poe.ninja response");
+        var url = string.Format(PoeNinjaUrlTemplate, Uri.EscapeDataString(league));
+        var response = await httpClient.GetAsync(url);
+        if (!response.IsSuccessStatusCode)
+            throw new HttpRequestException($"Failed to get poe.ninja response ({(int)response.StatusCode}) for league '{league}'");
 
         var json = await response.Content.ReadAsStringAsync();
         var poeNinjaResponse = JsonConvert.DeserializeObject<PoeNinjaResponse>(json);
 
-        return poeNinjaResponse.Lines.ToDictionary(line => line.Name, line => line.ChaosValue);
+        var prices = new Dictionary<string, float>();
+        if (poeNinjaResponse?.Lines == null) return prices;
+
+        foreach (var line in poeNinjaResponse.Lines)
+        {
+            if (string.IsNullOrEmpty(line?.Name) || line.ChaosValue == null) continue;
+            prices[line.Name] = line.ChaosValue.Value;
+        }
+
+        return prices;
     }
 }

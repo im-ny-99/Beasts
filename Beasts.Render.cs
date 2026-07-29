@@ -44,6 +44,9 @@ public partial class Beasts
 
     private readonly List<CachedBeastEntry> _cachedBeasts = new();
     private readonly Stopwatch _beastCacheTimer = Stopwatch.StartNew();
+    // Set when a WTC timeout leaves the cache possibly one action behind the
+    // server; forces a rebuild before the automation acts again.
+    private bool _beastCacheDirty;
     private bool _bestiaryVisible;
     private SharpDX.RectangleF _cachedPanelRect;
     private readonly HashSet<string> _selectedBeastPathsSet = new(StringComparer.Ordinal);
@@ -149,6 +152,23 @@ public partial class Beasts
     }
 
     /// <summary>
+    /// Reads a captured beast's SPECIES name (the name poe.ninja prices, e.g.
+    /// "Primal Cystcaller") via the core CapturedBeast.Name read. Falls back
+    /// to the tile tooltip's species line ("- {Species} -" at Tooltip[1][0])
+    /// when the memory read comes back empty, which happens while core
+    /// offsets lag a game patch. The tile's own name bar is the random rare
+    /// monster name and must never be used for pricing. Returns null when
+    /// neither source resolves so the beast is skipped rather than mispriced.
+    /// </summary>
+    private static string ReadBeastName(CapturedBeast beast)
+    {
+        var name = beast.Name;
+        if (string.IsNullOrWhiteSpace(name))
+            name = beast.Tooltip?.GetChildFromIndices(1, 0)?.Text;
+        return name?.Replace("-", "").Trim();
+    }
+
+    /// <summary>
     /// Rebuilds the cached beast list from the Bestiary UI panel.
     /// Calling CapturedBeastsPanel.CapturedBeasts is the most expensive operation
     /// in this plugin (allocates a new List + reads all addresses from memory).
@@ -157,6 +177,7 @@ public partial class Beasts
     /// </summary>
     private void RefreshBeastCache()
     {
+        _beastCacheDirty = false;
         _cachedBeasts.Clear();
         _bestiaryVisible = false;
 
@@ -179,14 +200,25 @@ public partial class Beasts
         var cbp = bestiary.CapturedBeastsTab;
         if (cbp == null || !cbp.IsVisible) return;
 
+        // The captured list lives at cbp[1][0]. On the other bestiary sub-tabs
+        // (book pages, recipes) that chain is absent and the core getter both
+        // logs "Element with index not found" and throws NRE -- probe the
+        // chain silently first (GetChildAtIndex does not log).
+        if (cbp.GetChildAtIndex(1)?.GetChildAtIndex(0) == null) return;
+
+        List<CapturedBeast> capturedBeasts;
+        try { capturedBeasts = cbp.CapturedBeasts; }
+        catch { return; }
+        if (capturedBeasts == null) return;
+
         _bestiaryVisible = true;
         _cachedPanelRect = cbp.GetClientRect();
 
-        foreach (var beast in cbp.CapturedBeasts)
+        foreach (var beast in capturedBeasts)
         {
             try
             {
-                var name = beast.Name?.Replace("-", "").Trim();
+                var name = ReadBeastName(beast);
                 if (string.IsNullOrEmpty(name)) continue;
 
                 var isGenericYellow = !Settings.BeastPrices.TryGetValue(name, out var price);

@@ -64,10 +64,21 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
     {
         if (!TryBeginPriceRefresh(forceRefresh)) return;
 
-        DebugWindow.LogMsg("Fetching Beast Prices from PoeNinja...");
         try
         {
-            var prices = await PoeNinja.GetBeastsPrices();
+            var league = GetCurrentLeague();
+            if (string.IsNullOrEmpty(league))
+            {
+                // Not in game yet (login/character select) -- retry shortly instead of
+                // waiting a full refresh period for the first successful fetch.
+                _lastPriceRefreshAttemptUtc = DateTime.UtcNow
+                    .AddMinutes(-Math.Max(1, Settings.PriceRefreshMinutes.Value))
+                    .AddSeconds(10);
+                return;
+            }
+
+            DebugWindow.LogMsg($"Fetching Beast Prices from PoeNinja (league: {league})...");
+            var prices = await PoeNinja.GetBeastsPrices(league);
             foreach (var beast in BeastsDatabase.AllBeasts)
             {
                 Settings.BeastPrices[beast.DisplayName] = prices.TryGetValue(beast.DisplayName, out var price) ? price : -1;
@@ -77,12 +88,20 @@ public partial class Beasts : BaseSettingsPlugin<BeastsSettings>
         }
         catch (Exception exception)
         {
-            DebugWindow.LogMsg($"Failed to fetch Beast Prices from PoeNinja: {exception.Message}");
+            DebugWindow.LogError($"Failed to fetch Beast Prices from PoeNinja: {exception.Message}");
         }
         finally
         {
             Interlocked.Exchange(ref _isFetchingPrices, 0);
         }
+    }
+
+    private string GetCurrentLeague()
+    {
+        var league = GameController?.Game?.IngameState?.ServerData?.League;
+        if (string.IsNullOrWhiteSpace(league)) return null;
+        if (league.StartsWith("SSF ", StringComparison.Ordinal)) league = league["SSF ".Length..];
+        return league;
     }
 
     private bool TryBeginPriceRefresh(bool forceRefresh)

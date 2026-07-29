@@ -113,16 +113,33 @@ public partial class Beasts
 
     // ── Click helpers ─────────────────────────────────────────────────────────
 
-    private async SyncTask<bool> CtrlClickElement(Element element)
+    /// <summary>
+    /// True while the tile still shows the beast we cached. The bestiary grid
+    /// re-binds tile slots 1-2 frames after the server confirms an action, so
+    /// both the position AND the identity measured at cache time can go stale
+    /// between deciding to click and the physical click.
+    /// </summary>
+    private bool BeastStillMatches(CapturedBeast beast, string expectedName)
     {
-        if (element == null) return false;
+        try { return ReadBeastName(beast) == expectedName; }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Ctrl+clicks a beast-tile button, re-verifying geometry and identity as
+    /// late as possible. Returns false WITHOUT clicking when the slot re-bound
+    /// or moved under us -- the caller must re-cache and pick a fresh target.
+    /// </summary>
+    private async SyncTask<bool> CtrlClickBeastButton(CapturedBeast beast, Element button, string expectedName)
+    {
+        if (button == null) return false;
 
         var windowOffset = GameController.Window.GetWindowRectangleTimeCache.TopLeft.ToVector2Num();
-        var clickPos = GetRandomClickPos(element.GetClientRect()) + windowOffset;
+        var clickPos = GetRandomClickPos(button.GetClientRect()) + windowOffset;
 
         bool ok = Settings.Automation.UseInputHumanizer.Value
-            ? await CtrlClickViaHumanizer(clickPos)
-            : await CtrlClickSimple(clickPos);
+            ? await CtrlClickViaHumanizer(beast, button, expectedName, clickPos, windowOffset)
+            : await CtrlClickSimple(beast, button, expectedName, clickPos, windowOffset);
 
         if (!ok) return false;
 
@@ -130,10 +147,30 @@ public partial class Beasts
         return true;
     }
 
-    private async SyncTask<bool> CtrlClickSimple(Vector2 clickPos)
+    private async SyncTask<bool> CtrlClickSimple(CapturedBeast beast, Element button, string expectedName, Vector2 clickPos, Vector2 windowOffset)
     {
         Input.SetCursorPos(clickPos);
         await WaitMs(Settings.Automation.PreClickDelayMs.Value);
+
+        // The grid may have reflowed during the pre-click delay (the previous
+        // action's visual removal can land 1-2 frames after its WTC confirm).
+        // If the button moved out from under the cursor, re-aim once and give
+        // the layout a frame to settle.
+        try
+        {
+            var rect = button.GetClientRect();
+            if (rect.Width <= 0 || rect.Height <= 0) return false;
+            if (!rect.Contains(clickPos.X - windowOffset.X, clickPos.Y - windowOffset.Y))
+            {
+                clickPos = GetRandomClickPos(rect) + windowOffset;
+                Input.SetCursorPos(clickPos);
+                await TaskUtils.NextFrame();
+            }
+        }
+        catch { return false; }
+
+        // Last-moment identity check, ~2 frames from the actual click.
+        if (!BeastStillMatches(beast, expectedName)) return false;
 
         Input.KeyDown(Keys.ControlKey);
         await TaskUtils.NextFrame();
@@ -143,7 +180,7 @@ public partial class Beasts
         return true;
     }
 
-    private async SyncTask<bool> CtrlClickViaHumanizer(Vector2 clickPos)
+    private async SyncTask<bool> CtrlClickViaHumanizer(CapturedBeast beast, Element button, string expectedName, Vector2 clickPos, Vector2 windowOffset)
     {
         var getController = GameController.PluginBridge
             .GetMethod<Func<string, TimeSpan, SyncTask<object>>>("InputHumanizer.GetInputController");
@@ -164,6 +201,20 @@ public partial class Beasts
 
         try
         {
+            // Aim at the freshest rect and re-verify identity right before the
+            // humanized click -- the movement itself adds delay during which
+            // the grid may re-bind. (The residual window during the humanized
+            // motion cannot be closed from this side.)
+            try
+            {
+                var rect = button.GetClientRect();
+                if (rect.Width <= 0 || rect.Height <= 0) return false;
+                clickPos = GetRandomClickPos(rect) + windowOffset;
+            }
+            catch { return false; }
+
+            if (!BeastStillMatches(beast, expectedName)) return false;
+
             controller.KeyDown(Keys.ControlKey);
             await controller.Click(clickPos);
             await controller.KeyUp(Keys.ControlKey, true);
@@ -182,6 +233,7 @@ public partial class Beasts
     {
         var cfg = Settings.Automation;
         var loopSw = Stopwatch.StartNew();
+        var verifyFailures = 0;
 
         // Outer loop: after each confirmed beast, refresh the cache and immediately
         // look for the next one -- no task restart overhead or stale-cache delay.
@@ -193,6 +245,14 @@ public partial class Beasts
             // WTC fallback: only delays if the previous action timed out without server confirmation.
             if (_sinceLastClick.ElapsedMilliseconds < _nextActionDelayMs)
                 return true;
+
+            // A timed-out click may still resolve server-side during the fallback
+            // delay, re-binding the grid slots. Never act on the pre-timeout cache.
+            if (_beastCacheDirty)
+            {
+                RefreshBeastCache();
+                _beastCacheTimer.Restart();
+            }
 
             // Use the render-layer cache -- avoids re-reading beast addresses from memory.
             if (!_bestiaryVisible || _cachedBeasts.Count == 0) return true;
@@ -254,7 +314,7 @@ public partial class Beasts
                     // of risking a misclick on a valuable beast.
                     if (shouldItemize)
                     {
-                        var liveName = entry.Element.Name?.Replace("-", "").Trim();
+                        var liveName = ReadBeastName(entry.Element);
                         if (liveName != entry.DisplayName)
                         {
                             RefreshBeastCache();
@@ -273,7 +333,22 @@ public partial class Beasts
                             : "FAST";
 
                     loopSw.Restart();
-                    await CtrlClickElement(btn);
+                    if (!await CtrlClickBeastButton(entry.Element, btn, entry.DisplayName))
+                    {
+                        // Slot re-bound or moved between caching and clicking --
+                        // re-cache and restart instead of clicking a different beast.
+                        RefreshBeastCache();
+                        _beastCacheTimer.Restart();
+                        if (++verifyFailures >= 3)
+                        {
+                            LogMsg("[Beast] click verification failed 3x -- backing off");
+                            _nextActionDelayMs = cfg.FallbackDelayMs.Value;
+                            return true;
+                        }
+                        clickedAny = true;
+                        break;
+                    }
+                    verifyFailures = 0;
                     var clickMs = loopSw.ElapsedMilliseconds;
 
                     // WTC: poll cache refresh until beast count decreases.
@@ -307,6 +382,9 @@ public partial class Beasts
                     {
                         LogMsg($"[Beast] click={clickMs}ms wtc=TIMEOUT({wtcMs}ms) ping={ping}ms zone={zone} -- applying fallback delay");
                         _nextActionDelayMs = Settings.Automation.FallbackDelayMs.Value;
+                        // The click may still land during the fallback delay --
+                        // force a cache rebuild before the next run acts.
+                        _beastCacheDirty = true;
                         return true;
                     }
                 }
