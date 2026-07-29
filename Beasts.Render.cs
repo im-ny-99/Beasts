@@ -466,7 +466,10 @@ public partial class Beasts
                 if (rect.Contains(mouse.X, mouse.Y)) continue;
 
                 var price = entry.Price;
-                if (entry.IsGenericYellow && price <= 0) continue;
+                // Generic yellows carry a ~2c floor price now -- labelling them
+                // is noise. Only label a yellow when it is valuable enough to
+                // be itemized by the automation.
+                if (entry.IsGenericYellow && price < Settings.Automation.ItemizeAboveChaos.Value) continue;
 
                 string label;
                 Color color;
@@ -667,11 +670,10 @@ public partial class Beasts
 
             if (isYellow)
             {
+                // Yellow overlay only -- the floor price of generic captures is
+                // not worth a label.
                 Graphics.DrawBox(itemRect, new Color(255, 255, 0, 0.1f));
                 Graphics.DrawFrame(itemRect, new Color(255, 255, 0, 0.2f), 1);
-                if (hasPrice)
-                    Graphics.DrawText($"{price.ToString(CultureInfo.InvariantCulture)}c",
-                        itemRect.Center, new Color(255, 210, 80), FontAlign.Center);
             }
             else if (hasPrice)
             {
