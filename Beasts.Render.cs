@@ -171,14 +171,19 @@ public partial class Beasts
         return name?.Trim(' ', '-');
     }
 
-    // Red-beast species set straight from the game's bestiary data: rows with
-    // the IsReadBeast flag in BestiaryCapturableMonsters.dat. Yellow beasts --
-    // the generic parchment-art captures -- are every species not flagged.
+    // Red/yellow classification straight from the game's bestiary data
+    // (IsReadBeast flag on BestiaryCapturableMonsters.dat rows). Several
+    // species NAMES have both red and yellow rows (e.g. Merveil's Favoured:
+    // SeaWitch row is red, SeaWitch2 row is yellow), so classification must
+    // be per ROW: by dat Id for panel tiles, by MonsterVariety path for
+    // itemised orbs. The by-name set only survives as a last-resort fallback.
+    private readonly Dictionary<int, (bool IsRed, string Name)> _beastRowById = new();
+    private readonly Dictionary<string, bool> _redByVariety = new(StringComparer.Ordinal);
     private readonly HashSet<string> _redBeastNames = new(StringComparer.Ordinal);
 
-    private void EnsureRedBeastNames()
+    private void EnsureRedBeastData()
     {
-        if (_redBeastNames.Count > 0) return;
+        if (_beastRowById.Count > 0) return;
         try
         {
             var file = GameController.Files.BestiaryCapturableMonsters;
@@ -189,8 +194,16 @@ public partial class Beasts
             {
                 try
                 {
-                    if (e.IsReadBeast && !string.IsNullOrEmpty(e.MonsterName))
-                        _redBeastNames.Add(e.MonsterName.Trim(' ', '-'));
+                    var isRed = e.IsReadBeast;
+                    var name = e.MonsterName?.Trim(' ', '-') ?? "";
+                    _beastRowById[e.Id] = (isRed, name);
+
+                    var variety = e.MonsterVariety?.VarietyId;
+                    if (!string.IsNullOrEmpty(variety))
+                        _redByVariety[variety] = isRed || (_redByVariety.TryGetValue(variety, out var prev) && prev);
+
+                    if (isRed && name.Length > 0)
+                        _redBeastNames.Add(name);
                 }
                 catch { }
             }
@@ -210,7 +223,7 @@ public partial class Beasts
         _beastCacheDirty = false;
         _cachedBeasts.Clear();
         _bestiaryVisible = false;
-        EnsureRedBeastNames();
+        EnsureRedBeastData();
 
         // _selectedBeastPathsSet is rebuilt unconditionally in Render() — no need to
         // repeat it here. Only compute the display-name set needed for _cachedBeasts.
@@ -253,12 +266,18 @@ public partial class Beasts
                 if (string.IsNullOrEmpty(name)) continue;
 
                 var hasPrice = Settings.BeastPrices.TryGetValue(name, out var price);
-                // Yellow = species without the red-beast flag in the game's own
-                // bestiary data (generic parchment-art captures). Falls back to
-                // "unpriced = yellow" if the dat could not be read.
-                var isGenericYellow = _redBeastNames.Count > 0
-                    ? !_redBeastNames.Contains(name)
-                    : !hasPrice;
+                // Classify per dat ROW via the tile's BeastId (name-checked so a
+                // garbage id read can never silently misclassify); fall back to
+                // the by-name red set, then to price presence.
+                bool isGenericYellow;
+                short beastId = -1;
+                try { beastId = beast.BeastId; } catch { }
+                if (beastId >= 0 && _beastRowById.TryGetValue(beastId, out var row) && row.Name == name)
+                    isGenericYellow = !row.IsRed;
+                else if (_redBeastNames.Count > 0)
+                    isGenericYellow = !_redBeastNames.Contains(name);
+                else
+                    isGenericYellow = !hasPrice;
 
                 _cachedBeasts.Add(new CachedBeastEntry(
                     beast, name, price, isGenericYellow,
@@ -623,7 +642,7 @@ public partial class Beasts
     private void DrawCapturedBeasts(IList<NormalInventoryItem> items)
     {
         if (items == null || items.Count == 0) return;
-        EnsureRedBeastNames();
+        EnsureRedBeastData();
 
         foreach (var item in items)
         {
@@ -632,16 +651,24 @@ public partial class Beasts
 
             var itemRect = item.GetClientRect();
             var monster = item.Item.GetComponent<CapturedMonster>();
-            var monsterName = monster?.MonsterVariety?.MonsterName;
+            var variety = monster?.MonsterVariety;
+            var monsterName = variety?.MonsterName;
 
             float price = 0;
             var hasPrice = !string.IsNullOrEmpty(monsterName) && Settings.BeastPrices.TryGetValue(monsterName, out price);
-            // Yellow = species without the red-beast flag in the game data --
-            // every species has a poe.ninja floor price now, so price presence
-            // no longer distinguishes yellows (only used as fallback when the
-            // dat could not be read).
-            var isYellow = string.IsNullOrEmpty(monsterName) ||
-                           (_redBeastNames.Count > 0 ? !_redBeastNames.Contains(monsterName) : !hasPrice);
+            // Classify per dat ROW via the orb's MonsterVariety path (species
+            // names can have both red and yellow rows); fall back to the
+            // by-name red set, then to price presence.
+            bool isYellow;
+            var varietyId = variety?.VarietyId;
+            if (!string.IsNullOrEmpty(varietyId) && _redByVariety.TryGetValue(varietyId, out var isRed))
+                isYellow = !isRed;
+            else if (string.IsNullOrEmpty(monsterName))
+                isYellow = true;
+            else if (_redBeastNames.Count > 0)
+                isYellow = !_redBeastNames.Contains(monsterName);
+            else
+                isYellow = !hasPrice;
 
             if (isYellow)
             {
