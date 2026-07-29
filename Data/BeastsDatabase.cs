@@ -101,15 +101,9 @@ public static class BeastsDatabase
             Path = "Metadata/Monsters/LeagueHarvest/Green/HarvestVultureParasiteT3",
             Crafts = ["Transform an Item: Reroll a Synthesis Implicit Modifier"]
         },
-        new Beast
-        {
-            DisplayName = "Craicic Chimeral",
-            Path = "Metadata/Monsters/LeagueBestiary/GemFrogBestiary",
-            Crafts =
-            [
-                "Create an Imprint: Of a Magic Item"
-            ]
-        },
+        // "Craicic Chimeral" was removed: the species no longer exists in
+        // BestiaryCapturableMonsters.dat and its path (GemFrogBestiary) now
+        // belongs to Craicic Croaker, which inherited the imprint craft.
         new Beast
         {
             DisplayName = "Wild Hellion Alpha",
@@ -558,6 +552,20 @@ public static class BeastsDatabase
             [
                 "Create Currency Items: A Stack of 3 Orbs of Horizons",
                 "Create a Unique: Helmet"
+            ]
+        },
+        // Path from BestiaryCapturableMonsters.dat (MonsterVariety.VarietyId);
+        // crafts from the in-game recipe data. League-mechanic beasts without a
+        // bestiary recipe are intentionally NOT listed here -- they still price
+        // correctly because FetchPrices keeps the full poe.ninja table.
+        new Beast
+        {
+            DisplayName = "Craicic Croaker",
+            Path = "Metadata/Monsters/LeagueBestiary/GemFrogBestiary",
+            Crafts =
+            [
+                "Create an Imprint: Of a Magic Item",
+                "Croaker Talisman"
             ]
         }
     };

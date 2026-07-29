@@ -165,7 +165,52 @@ public partial class Beasts
         var name = beast.Name;
         if (string.IsNullOrWhiteSpace(name))
             name = beast.Tooltip?.GetChildFromIndices(1, 0)?.Text;
-        return name?.Replace("-", "").Trim();
+        // Trim only the tooltip's "- Species -" decoration; inner hyphens are
+        // part of real species names ("Goatman Fire-raiser") and must survive
+        // or price lookups against poe.ninja keys fail.
+        return name?.Trim(' ', '-');
+    }
+
+    // Red/yellow classification straight from the game's bestiary data
+    // (IsReadBeast flag on BestiaryCapturableMonsters.dat rows). 19 species
+    // NAMES carry both red and yellow rows (e.g. Merveil's Favoured: the
+    // SeaWitch row is red, SeaWitch2 is yellow) and panel tiles expose no
+    // reliable row reference (CapturedBeast.BeastId is NOT the dat row id),
+    // so a name counts as red only when EVERY row with that name is
+    // red-flagged -- captures of mixed names are the yellow rows in
+    // practice, and the automation's price-first rule protects any valuable
+    // exception. Itemised orbs DO expose their exact row via the
+    // MonsterVariety path, so they classify per row.
+    private readonly Dictionary<string, bool> _redByName = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, bool> _redByVariety = new(StringComparer.Ordinal);
+
+    private void EnsureRedBeastData()
+    {
+        if (_redByName.Count > 0) return;
+        try
+        {
+            var file = GameController.Files.BestiaryCapturableMonsters;
+            file.ReloadIfEmpty();
+            var entries = file.EntriesList;
+            if (entries == null) return;
+            foreach (var e in entries)
+            {
+                try
+                {
+                    var isRed = e.IsReadBeast;
+
+                    var name = e.MonsterName?.Trim(' ', '-') ?? "";
+                    if (name.Length > 0)
+                        _redByName[name] = _redByName.TryGetValue(name, out var prev) ? prev && isRed : isRed;
+
+                    var variety = e.MonsterVariety?.VarietyId;
+                    if (!string.IsNullOrEmpty(variety))
+                        _redByVariety[variety] = isRed;
+                }
+                catch { }
+            }
+        }
+        catch { }
     }
 
     /// <summary>
@@ -180,6 +225,7 @@ public partial class Beasts
         _beastCacheDirty = false;
         _cachedBeasts.Clear();
         _bestiaryVisible = false;
+        EnsureRedBeastData();
 
         // _selectedBeastPathsSet is rebuilt unconditionally in Render() — no need to
         // repeat it here. Only compute the display-name set needed for _cachedBeasts.
@@ -221,8 +267,12 @@ public partial class Beasts
                 var name = ReadBeastName(beast);
                 if (string.IsNullOrEmpty(name)) continue;
 
-                var isGenericYellow = !Settings.BeastPrices.TryGetValue(name, out var price);
-                // Yellow beasts not tracked by poe.ninja → price 0, always released.
+                var hasPrice = Settings.BeastPrices.TryGetValue(name, out var price);
+                // Red only when every dat row with this name is red-flagged
+                // (see EnsureRedBeastData); price presence as last resort.
+                var isGenericYellow = _redByName.TryGetValue(name, out var isRed)
+                    ? !isRed
+                    : !hasPrice;
 
                 _cachedBeasts.Add(new CachedBeastEntry(
                     beast, name, price, isGenericYellow,
@@ -416,7 +466,10 @@ public partial class Beasts
                 if (rect.Contains(mouse.X, mouse.Y)) continue;
 
                 var price = entry.Price;
-                if (entry.IsGenericYellow && price <= 0) continue;
+                // Generic yellows carry a ~2c floor price now -- labelling them
+                // is noise. Only label a yellow when it is valuable enough to
+                // be itemized by the automation.
+                if (entry.IsGenericYellow && price < Settings.Automation.ItemizeAboveChaos.Value) continue;
 
                 string label;
                 Color color;
@@ -587,6 +640,7 @@ public partial class Beasts
     private void DrawCapturedBeasts(IList<NormalInventoryItem> items)
     {
         if (items == null || items.Count == 0) return;
+        EnsureRedBeastData();
 
         foreach (var item in items)
         {
@@ -595,18 +649,37 @@ public partial class Beasts
 
             var itemRect = item.GetClientRect();
             var monster = item.Item.GetComponent<CapturedMonster>();
-            var monsterName = monster?.MonsterVariety?.MonsterName;
+            var variety = monster?.MonsterVariety;
+            var monsterName = variety?.MonsterName;
 
-            if (!string.IsNullOrEmpty(monsterName) && Settings.BeastPrices.TryGetValue(monsterName, out var price))
+            float price = 0;
+            var hasPrice = !string.IsNullOrEmpty(monsterName) && Settings.BeastPrices.TryGetValue(monsterName, out price);
+            // Classify per dat ROW via the orb's MonsterVariety path (species
+            // names can have both red and yellow rows); fall back to the
+            // all-rows-red name rule, then to price presence.
+            bool isYellow;
+            var varietyId = variety?.VarietyId;
+            if (!string.IsNullOrEmpty(varietyId) && _redByVariety.TryGetValue(varietyId, out var isRed))
+                isYellow = !isRed;
+            else if (string.IsNullOrEmpty(monsterName))
+                isYellow = true;
+            else if (_redByName.TryGetValue(monsterName, out var nameIsRed))
+                isYellow = !nameIsRed;
+            else
+                isYellow = !hasPrice;
+
+            if (isYellow)
+            {
+                // Yellow overlay only -- the floor price of generic captures is
+                // not worth a label.
+                Graphics.DrawBox(itemRect, new Color(255, 255, 0, 0.1f));
+                Graphics.DrawFrame(itemRect, new Color(255, 255, 0, 0.2f), 1);
+            }
+            else if (hasPrice)
             {
                 Graphics.DrawBox(itemRect, new Color(0, 0, 0, 0.1f));
                 Graphics.DrawText($"{price.ToString(CultureInfo.InvariantCulture)}c",
                     itemRect.Center, Color.White, FontAlign.Center);
-            }
-            else
-            {
-                Graphics.DrawBox(itemRect, new Color(255, 255, 0, 0.1f));
-                Graphics.DrawFrame(itemRect, new Color(255, 255, 0, 0.2f), 1);
             }
         }
     }
