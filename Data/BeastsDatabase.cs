@@ -554,8 +554,10 @@ public static class BeastsDatabase
                 "Create a Unique: Helmet"
             ]
         },
-        // ── Species below were missing while poe.ninja priced them.
-        //    Paths come from BestiaryCapturableMonsters.dat (MonsterVariety.VarietyId).
+        // Path from BestiaryCapturableMonsters.dat (MonsterVariety.VarietyId);
+        // crafts from the in-game recipe data. League-mechanic beasts without a
+        // bestiary recipe are intentionally NOT listed here -- they still price
+        // correctly because FetchPrices keeps the full poe.ninja table.
         new Beast
         {
             DisplayName = "Craicic Croaker",
@@ -565,72 +567,6 @@ public static class BeastsDatabase
                 "Create an Imprint: Of a Magic Item",
                 "Croaker Talisman"
             ]
-        },
-        new Beast
-        {
-            DisplayName = "Wild Chimeral",
-            Path = "Metadata/Monsters/GemMonster/IguanaUntainted",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
-        },
-        new Beast
-        {
-            DisplayName = "Primal Beast",
-            Path = "Metadata/Monsters/Beasts/BeastUntainted",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
-        },
-        new Beast
-        {
-            DisplayName = "Bestial Maw",
-            Path = "Metadata/Monsters/Frog/FrogUntainted",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
-        },
-        new Beast
-        {
-            DisplayName = "Aboriginal Chieftain",
-            Path = "Metadata/Monsters/BloodChieftain/MonkeyChiefBloodEnrageUntainted",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
-        },
-        new Beast
-        {
-            DisplayName = "Infested Ursa",
-            Path = "Metadata/Monsters/DropBear/DropBear3Parasite",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
-        },
-        new Beast
-        {
-            DisplayName = "Infested Ursa",
-            Path = "Metadata/Monsters/DropBear/DropBear3SpawnParasite",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
-        },
-        new Beast
-        {
-            DisplayName = "Infested Ursa",
-            Path = "Metadata/Monsters/DropBear/DropBearGround3Parasite_",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
-        },
-        new Beast
-        {
-            DisplayName = "Infested Ursa",
-            Path = "Metadata/Monsters/DropBear/DropBearGroundSpawn3Parasite",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
-        },
-        new Beast
-        {
-            DisplayName = "Goatman Fire-raiser",
-            Path = "Metadata/Monsters/Goatman/GoatmanShamanFireChampion",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
-        },
-        new Beast
-        {
-            DisplayName = "Forest Beast",
-            Path = "Metadata/Monsters/Beasts/BeastSlam",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
-        },
-        new Beast
-        {
-            DisplayName = "Rooster Demon",
-            Path = "Metadata/Monsters/Cockerel/CockerelBow",
-            Crafts = ["Tradeable league beast (no bestiary recipe)"]
         }
     };
 
