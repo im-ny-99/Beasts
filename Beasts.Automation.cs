@@ -7,6 +7,7 @@ using ExileCore.PoEMemory.Elements;
 using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared;
 using ExileCore.Shared.Helpers;
+using InputHumanizer.Input;
 using Vector2 = System.Numerics.Vector2;
 
 namespace Beasts;
@@ -184,8 +185,12 @@ public partial class Beasts
 
     private async SyncTask<bool> CtrlClickViaHumanizer(CapturedBeast beast, Element button, string expectedName, Vector2 clickPos, Vector2 windowOffset)
     {
+        // Typed against the stock InputHumanizerLib: PluginBridge.GetMethod is a
+        // plain `as T` cast, so the delegate type must match the registration
+        // exactly (Func<..., SyncTask<IInputController>>) -- requesting
+        // SyncTask<object> always came back null.
         var getController = GameController.PluginBridge
-            .GetMethod<Func<string, TimeSpan, SyncTask<object>>>("InputHumanizer.GetInputController");
+            .GetMethod<Func<string, TimeSpan, SyncTask<IInputController>>>("InputHumanizer.GetInputController");
 
         if (getController == null)
         {
@@ -194,7 +199,7 @@ public partial class Beasts
             return false;
         }
 
-        dynamic controller = await getController("Beasts", TimeSpan.FromMilliseconds(500));
+        var controller = await getController("Beasts", TimeSpan.FromMilliseconds(500));
         if (controller == null)
         {
             LogError("InputHumanizer busy -- another plugin holds the input lock.");
@@ -217,8 +222,8 @@ public partial class Beasts
 
             if (!BeastStillMatches(beast, expectedName)) return false;
 
-            controller.KeyDown(Keys.ControlKey);
-            await controller.Click(clickPos);
+            await controller.KeyDown(Keys.ControlKey);
+            await controller.Click(MouseButtons.Left, clickPos);
             await controller.KeyUp(Keys.ControlKey, true);
         }
         finally

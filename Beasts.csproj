@@ -21,6 +21,10 @@
       <HintPath>$(exapiPackage)\GameOffsets.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="InputHumanizerLib">
+      <HintPath>$(exapiPackage)\InputHumanizerLib.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="ImGui.NET" Version="1.90.0.1" />
