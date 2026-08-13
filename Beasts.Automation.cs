@@ -7,6 +7,7 @@ using ExileCore.PoEMemory.Elements;
 using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared;
 using ExileCore.Shared.Helpers;
+using InputHumanizer.Input;
 using Vector2 = System.Numerics.Vector2;
 
 namespace Beasts;
@@ -113,6 +114,13 @@ public partial class Beasts
         return false;
     }
 
+    /// <summary>Current item count in the player inventory, or -1 when unreadable.</summary>
+    private int InventoryItemCount()
+    {
+        try { return _automationInventory?.InventorySlotItems?.Count ?? -1; }
+        catch { return -1; }
+    }
+
     // ── Click helpers ─────────────────────────────────────────────────────────
 
     /// <summary>
@@ -125,6 +133,36 @@ public partial class Beasts
     {
         try { return ReadBeastName(beast) == expectedName; }
         catch { return false; }
+    }
+
+    /// <summary>
+    /// Waits until the element's rect is identical on two consecutive frames.
+    /// The bestiary reflow after a removal settles over SEVERAL frames (slot
+    /// data re-binds within a category while later categories shift position),
+    /// so a single post-arrival rect read can still race the layout and leave
+    /// the cursor over a neighbouring beast. Returns the settled rect, or null
+    /// when the element stays unstable or invalid past the frame budget.
+    /// </summary>
+    private static async SyncTask<SharpDX.RectangleF?> WaitForStableRect(Element element, int maxFrames = 12)
+    {
+        SharpDX.RectangleF last;
+        try { last = element.GetClientRect(); } catch { return null; }
+
+        for (var i = 0; i < maxFrames; i++)
+        {
+            await TaskUtils.NextFrame();
+            SharpDX.RectangleF cur;
+            try { cur = element.GetClientRect(); } catch { return null; }
+            if (cur.Width <= 0 || cur.Height <= 0) return null;
+
+            if (Math.Abs(cur.X - last.X) < 0.5f && Math.Abs(cur.Y - last.Y) < 0.5f &&
+                Math.Abs(cur.Width - last.Width) < 0.5f && Math.Abs(cur.Height - last.Height) < 0.5f)
+                return cur;
+
+            last = cur;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -154,22 +192,18 @@ public partial class Beasts
         Input.SetCursorPos(clickPos);
         await WaitMs(Settings.Automation.PreClickDelayMs.Value);
 
-        // The grid may have reflowed during the pre-click delay (the previous
-        // action's visual removal can land 1-2 frames after its WTC confirm).
-        // If the button moved out from under the cursor, re-aim once and give
-        // the layout a frame to settle.
-        try
+        // Wait for the target rect to stop moving and keep the cursor inside
+        // it (bounded re-aims) before committing the click.
+        for (var attempt = 0; ; attempt++)
         {
-            var rect = button.GetClientRect();
-            if (rect.Width <= 0 || rect.Height <= 0) return false;
-            if (!rect.Contains(clickPos.X - windowOffset.X, clickPos.Y - windowOffset.Y))
-            {
-                clickPos = GetRandomClickPos(rect) + windowOffset;
-                Input.SetCursorPos(clickPos);
-                await TaskUtils.NextFrame();
-            }
+            var rect = await WaitForStableRect(button);
+            if (!rect.HasValue) return false;
+            if (rect.Value.Contains(clickPos.X - windowOffset.X, clickPos.Y - windowOffset.Y)) break;
+            if (attempt >= 2) return false;
+            clickPos = GetRandomClickPos(rect.Value) + windowOffset;
+            Input.SetCursorPos(clickPos);
+            await TaskUtils.NextFrame();
         }
-        catch { return false; }
 
         // Last-moment identity check, ~2 frames from the actual click.
         if (!BeastStillMatches(beast, expectedName)) return false;
@@ -184,8 +218,12 @@ public partial class Beasts
 
     private async SyncTask<bool> CtrlClickViaHumanizer(CapturedBeast beast, Element button, string expectedName, Vector2 clickPos, Vector2 windowOffset)
     {
+        // Typed against the stock InputHumanizerLib: PluginBridge.GetMethod is a
+        // plain `as T` cast, so the delegate type must match the registration
+        // exactly (Func<..., SyncTask<IInputController>>) -- requesting
+        // SyncTask<object> always came back null.
         var getController = GameController.PluginBridge
-            .GetMethod<Func<string, TimeSpan, SyncTask<object>>>("InputHumanizer.GetInputController");
+            .GetMethod<Func<string, TimeSpan, SyncTask<IInputController>>>("InputHumanizer.GetInputController");
 
         if (getController == null)
         {
@@ -194,7 +232,7 @@ public partial class Beasts
             return false;
         }
 
-        dynamic controller = await getController("Beasts", TimeSpan.FromMilliseconds(500));
+        var controller = await getController("Beasts", TimeSpan.FromMilliseconds(500));
         if (controller == null)
         {
             LogError("InputHumanizer busy -- another plugin holds the input lock.");
@@ -203,22 +241,36 @@ public partial class Beasts
 
         try
         {
-            // Aim at the freshest rect and re-verify identity right before the
-            // humanized click -- the movement itself adds delay during which
-            // the grid may re-bind. (The residual window during the humanized
-            // motion cannot be closed from this side.)
+            // Humanized MOVEMENT first, verification at the destination, then a
+            // click-in-place. Aiming before the interpolated movement leaves a
+            // 100-300ms window for the layout to shift under the cursor, and
+            // the reflow itself settles over several frames -- so after
+            // arriving, wait for a STABLE rect and keep the cursor inside it
+            // (bounded re-aims) before clicking where the cursor is.
             try
             {
-                var rect = button.GetClientRect();
-                if (rect.Width <= 0 || rect.Height <= 0) return false;
-                clickPos = GetRandomClickPos(rect) + windowOffset;
+                var rect0 = button.GetClientRect();
+                if (rect0.Width <= 0 || rect0.Height <= 0) return false;
+                clickPos = GetRandomClickPos(rect0) + windowOffset;
             }
             catch { return false; }
 
+            if (!await controller.MoveMouse(clickPos)) return false;
+
+            for (var attempt = 0; ; attempt++)
+            {
+                var rect = await WaitForStableRect(button);
+                if (!rect.HasValue) return false;
+                if (rect.Value.Contains(clickPos.X - windowOffset.X, clickPos.Y - windowOffset.Y)) break;
+                if (attempt >= 2) return false;
+                clickPos = GetRandomClickPos(rect.Value) + windowOffset;
+                if (!await controller.MoveMouse(clickPos)) return false;
+            }
+
             if (!BeastStillMatches(beast, expectedName)) return false;
 
-            controller.KeyDown(Keys.ControlKey);
-            await controller.Click(clickPos);
+            await controller.KeyDown(Keys.ControlKey);
+            await controller.Click(MouseButtons.Left);
             await controller.KeyUp(Keys.ControlKey, true);
         }
         finally
@@ -334,6 +386,16 @@ public partial class Beasts
                             ? $"SLOW({releasesBeforeItemize})"
                             : "FAST";
 
+                    // The inventory-side server update lands a few frames AFTER
+                    // the beast-count confirm; capture the item count now so a
+                    // confirmed itemize can wait for its orb to appear before
+                    // the next iteration's inventory-space check runs on stale
+                    // data (which used to allow one extra click into a full
+                    // inventory).
+                    var invBefore = shouldItemize && cfg.CheckInventoryBeforeItemize.Value
+                        ? InventoryItemCount()
+                        : -1;
+
                     loopSw.Restart();
                     if (!await CtrlClickBeastButton(entry.Element, btn, entry.DisplayName))
                     {
@@ -364,6 +426,20 @@ public partial class Beasts
                         _nextActionDelayMs = 0;
                         // Cache is already refreshed inside WaitForBeastCountChange.
                         LogMsg($"[Beast] click={clickMs}ms wtc={wtcMs}ms ping={ping}ms zone={zone} cache={_cachedBeasts.Count} remaining");
+
+                        // Sync with the inventory after a confirmed itemize: wait
+                        // (bounded) for the orb to land so HasInventorySpace sees
+                        // the true state before the next target is processed.
+                        if (invBefore >= 0)
+                        {
+                            var invSw = Stopwatch.StartNew();
+                            while (invSw.ElapsedMilliseconds < 600)
+                            {
+                                var cur = InventoryItemCount();
+                                if (cur < 0 || cur > invBefore) break;
+                                await TaskUtils.NextFrame();
+                            }
+                        }
 
                         // SLOW zone: approaching an itemize target. Pause a few frames
                         // to let the game's input hit-testing catch up with the UI shift
