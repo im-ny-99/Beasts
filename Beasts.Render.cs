@@ -401,6 +401,8 @@ public partial class Beasts
             var snap = _renderSnapshots[i];
             if (!snap.IsSelected) continue;
 
+            if (snap.IsYellow && !Settings.ShowYellowBeastsOnMap.Value) continue;
+
             // Built-in safe circle helpers -- handle frustum edge cases correctly.
             // Two-layer pattern preserves the original 20% fill + full-alpha outline look.
             Graphics.DrawFilledCircleInWorld(snap.WorldPos, 100f, snap.FillColor);
@@ -605,6 +607,8 @@ public partial class Beasts
             {
                 var snap = _renderSnapshots[i];
                 if (!snap.IsYellow) continue;
+
+                if (!Settings.ShowYellowBeastsOnMap.Value) continue;
 
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
